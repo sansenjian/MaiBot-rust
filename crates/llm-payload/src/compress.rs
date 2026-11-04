@@ -11,11 +11,23 @@ use serde_json::Value;
 
 pub const DEFAULT_TARGET: usize = 1024 * 1024;
 
+/// 用 libjpeg-turbo（turbojpeg crate，cmake 构建捆绑库）编码 JPEG q95。
+/// 4:2:0 子采样对齐 PIL 默认；纯 Rust 编码器在此项上无法与 libjpeg-turbo 竞争
+/// （实测 68-107ms vs 待测，瓶颈画像见 e2e 文档）。
 fn encode_jpeg_q95(img: &image::DynamicImage) -> Option<Vec<u8>> {
-    let mut buf = Vec::new();
-    let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, 95);
-    enc.encode_image(img).ok()?;
-    Some(buf)
+    let rgb = img.to_rgb8();
+    let (w, h) = rgb.dimensions();
+    let mut comp = turbojpeg::Compressor::new().ok()?;
+    comp.set_quality(95).ok()?;
+    comp.set_subsamp(turbojpeg::Subsamp::Sub2x2).ok()?;
+    let tj_image = turbojpeg::Image {
+        width: w as usize,
+        pitch: (w * 3) as usize,
+        height: h as usize,
+        format: turbojpeg::PixelFormat::RGB,
+        pixels: rgb.as_raw(),
+    };
+    comp.compress_to_vec(tj_image).ok()
 }
 
 fn is_animated_gif(data: &[u8]) -> bool {
