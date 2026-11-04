@@ -52,3 +52,25 @@ QT_8bit 是逐维标量量化（dim 字节/向量）；IVF-PQ 降到与维度无
 1. 行为：记忆写入/检索回归测试通过（检索 Top-K 结果与原实现 diff，容差随 D2/D3 路线定义）
 2. 内存：启动峰值与稳态 RSS 前后对照（psrecord / tracemalloc 采启动段）
 3. 目标数字（10 万条、1536 维）：稳态 0.75-1GB → D1+D2b 后 ~150-250MB（4-6x），D3 后 <100MB
+
+
+---
+
+## 修正（2026-11-05 实码深读）
+
+**D1 与 D2a 上游已实现，从待办移除**：
+- D1 分批加载：`_replay_vectors_to_index` / `_bootstrap_fallback_from_disk` 均已是
+  chunk_size=10000 分块（v1.3.19 L1707/L2031），瞬时尖峰本就有限
+- D2a 训后清兜底：`_train_and_replay_unlocked` 在 `main.ntotal >= _bin_count` 时
+  已 `self._fallback_index.reset()`（L1700-1705）
+
+**剩余真实优化面 = 训练前窗口期**（启动 → warmup 训练完成之间，兜底以 float32
+全量驻留，内存 = dim×4B×N；训练触发时机见 `needs_training` L2836 / `warmup_index` L1939）：
+1. **缩短窗口**：调 warmup 配置让训练尽早触发（零代码）
+2. **窗口期内存减半/四分之一**：兜底换 QT_8bit（1B/dim）——D2b 仍然成立
+3. **窗口期零堆内拷贝（推荐，即 Rust 扫描器）**：用 mmap 扫描替代兜底索引，
+   见 docs/mem-scanner-design.md
+
+**验证建议（部署侧第一步）**：打印
+`main.is_trained, main.ntotal, fallback.ntotal, _bin_count` 四个水位，
+确认你的实际部署里窗口期有多长、兜底是否及时释放。
