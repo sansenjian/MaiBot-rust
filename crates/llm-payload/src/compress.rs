@@ -25,7 +25,7 @@ fn encode_jpeg_q95(img: &image::DynamicImage) -> Option<Vec<u8>> {
         pitch: (w * 3) as usize,
         height: h as usize,
         format: turbojpeg::PixelFormat::RGB,
-        pixels: rgb.as_raw(),
+        pixels: &rgb.as_raw()[..],
     };
     comp.compress_to_vec(tj_image).ok()
 }
