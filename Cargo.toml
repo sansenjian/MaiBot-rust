@@ -1,0 +1,7 @@
+[workspace]
+members = ["crates/jieba-pyo3", "crates/llm-payload"]
+resolver = "2"
+
+[profile.release]
+lto = true
+codegen-units = 1

@@ -1,0 +1,24 @@
+[package]
+name = "jieba-pyo3"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0"
+description = "jieba-rs PyO3 wrapper, API-compatible with Python jieba cut/lcut"
+
+[lib]
+name = "jieba_pyo3"
+crate-type = ["cdylib"]
+
+[features]
+# CI/本地 cargo test 用 --no-default-features（需要链接 libpython）；
+# maturin 构建走 default（extension-module，不链接解释器）。
+default = ["extension-module"]
+extension-module = ["pyo3/extension-module"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["abi3-py38"] }
+jieba-rs = { version = "0.7", features = ["default-dict"] }
+# 注意：jieba-rs 无 HMM feature（0.7 只有 default/default-dict/ordered-float/textrank/tfidf）
+# HMM 新词发现如需对齐，后续自研 viterbi + vendor CPython jieba hmm 概率表
+anyhow = "1"
+serde_json = "1"

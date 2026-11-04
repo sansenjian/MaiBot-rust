@@ -1,0 +1,23 @@
+[package]
+name = "llm-payload"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0"
+description = "P3: LLM payload hot paths in Rust (image compression, ContextItem->messages, token counting)"
+
+[lib]
+name = "llm_payload"
+crate-type = ["cdylib"]
+
+[features]
+default = ["extension-module"]
+extension-module = ["pyo3/extension-module"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["abi3-py38"] }
+serde_json = "1"
+anyhow = "1"
+base64 = "0.22"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
+gif = "0.13"
+tiktoken-rs = "0.6"  # 0.6 编码已内置，仅保留 async-openai/dhat-heap 可选 feature

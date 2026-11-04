@@ -1,0 +1,36 @@
+name: Rust accelerators
+
+on: [push, pull_request]
+
+jobs:
+  jieba-pyo3:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: pip install maturin jieba
+      - run: maturin build --release --manifest-path crates/jieba-pyo3/Cargo.toml
+      - run: cargo test --no-default-features --manifest-path crates/jieba-pyo3/Cargo.toml
+      - run: pip install target/wheels/jieba_pyo3*.whl
+      - run: python3 crates/jieba-pyo3/tests/python_diff.py
+      - uses: actions/upload-artifact@v4
+        with: { name: jieba_pyo3-wheel, path: target/wheels/jieba_pyo3*.whl }
+
+  llm-payload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: pip install maturin tiktoken pillow
+      - run: maturin build --release --manifest-path crates/llm-payload/Cargo.toml
+      - run: cargo test --no-default-features --manifest-path crates/llm-payload/Cargo.toml
+      - run: pip install target/wheels/llm_payload*.whl
+      - run: python3 crates/llm-payload/tests/python_diff.py
+      - uses: actions/upload-artifact@v4
+        with: { name: llm_payload-wheel, path: target/wheels/llm_payload*.whl }
