@@ -35,3 +35,18 @@ jobs:
       - run: python3 crates/llm-payload/tests/python_diff.py
       - uses: actions/upload-artifact@v4
         with: { name: llm_payload-wheel, path: target/wheels/llm_payload*.whl }
+
+  mem-search:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: pip install maturin
+      - run: cd crates/mem-search && maturin build --release
+      - run: cargo test --no-default-features --manifest-path crates/mem-search/Cargo.toml
+      - run: pip install target/wheels/mem_search*.whl
+      - uses: actions/upload-artifact@v4
+        with: { name: mem_search-wheel, path: target/wheels/mem_search*.whl }

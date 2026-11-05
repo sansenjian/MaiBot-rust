@@ -1,0 +1,20 @@
+[package]
+name = "mem-search"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0"
+description = "mmap float16 vector scanner (AVX2 dot product, PyO3); replaces A_memorix fallback index path with O(1) heap growth"
+
+[lib]
+name = "mem_search"
+crate-type = ["cdylib"]
+
+[features]
+default = ["extension-module"]
+extension-module = ["pyo3/extension-module"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["abi3-py38"] }
+memmap2 = "0.9"
+half = "2"
+anyhow = "1"
