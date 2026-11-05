@@ -321,12 +321,12 @@ mod tests {
         for id in [0x0102030405060708i64, -42i64] {
             ibuf.extend_from_slice(&id.to_be_bytes());
         }
-        std::fs::write("/tmp/ms_i64_v.bin", vbuf).unwrap();
-        std::fs::write("/tmp/ms_i64_i.bin", ibuf).unwrap();
+        std::fs::write("/tmp/ms_i64_v.bin", &vbuf).unwrap();
+        std::fs::write("/tmp/ms_i64_i_bad.bin", ibuf[..8].to_vec()).unwrap();
+        std::fs::write("/tmp/ms_i64_i.bin", &ibuf).unwrap();
         let s = StoreI64::open("/tmp/ms_i64_v.bin", dim, "/tmp/ms_i64_i.bin").unwrap();
         assert_eq!(s.search(&[1., 0., 0., 0.], 2)[0].0, 0x0102030405060708);
         assert_eq!(s.search(&[0., 1., 0., 0.], 2)[0].0, -42);
-        std::fs::write("/tmp/ms_i64_i_bad.bin", ibuf[..8].to_vec()).unwrap();
         assert!(StoreI64::open("/tmp/ms_i64_v.bin", dim, "/tmp/ms_i64_i_bad.bin").is_err());
     }
 
