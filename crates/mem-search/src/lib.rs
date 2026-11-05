@@ -248,7 +248,7 @@ impl PyStoreI64 {
     }
 
     fn __len__(&self) -> usize {
-        self.ids.len() / 8
+        self.store.ids.len() / 8
     }
 }
 
