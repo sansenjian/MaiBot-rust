@@ -128,7 +128,7 @@ unsafe fn dot_avx2(a: &[f32], b: &[f32]) -> f32 {
         i += 8;
     }
     let mut buf = [0f32; 8];
-    _mm256_storeu(buf.as_mut_ptr(), acc);
+    _mm256_storeu_ps(buf.as_mut_ptr(), acc);
     let mut sum: f32 = buf.iter().sum();
     while i < n {
         sum += a[i] * b[i];
