@@ -116,6 +116,7 @@ class ReadOnlyVectorStoreView:
         self._known_hashes = dict(known_hashes)
         self._row_offsets = dict(row_offsets)
         self._lock = threading.RLock()
+        self._mem_fallback = None  # rust-memorix: mem-search 兜底（mmap f16 扫描替代 float32 自举）
         self._index = faiss.IndexIDMap2(faiss.IndexFlatIP(self.dimension))
         self._load_index()
 
@@ -1704,6 +1705,7 @@ class VectorStore:
             if self._index.ntotal >= self._bin_count:
                 logger.info(f"Replay successful ({replay_count}/{self._bin_count}). Releasing fallback index.")
                 self._fallback_index.reset()
+                self._mem_fallback = None  # rust-memorix: 主索引就绪后 mem 兜底同步释放
             else:
                 logger.warning(
                     f"Replay count mismatch: {self._index.ntotal} vs {self._bin_count}. Keeping fallback index."
@@ -1782,30 +1784,52 @@ class VectorStore:
             self._raise_if_cleanup_checkpoint_broken_unlocked()
             self._flush_write_buffer_unlocked()
             search_index = self._index if (self._is_trained and self._index.ntotal > 0) else self._fallback_index
-            if search_index.ntotal == 0:
+            requested_k = max(1, int(k))
+            # rust-memorix：mem 兜底（磁盘全量，mmap 扫描）与 faiss 兜底（窗口期新增）合并
+            mem_hits: List[Tuple[int, float]] = []
+            if search_index is self._fallback_index and self._mem_fallback is not None:
+                try:
+                    mem_hits = self._mem_fallback.search(
+                        query_local.astype(np.float32).ravel().tolist(), requested_k * 2
+                    )
+                except Exception:
+                    mem_hits = []
+            if search_index.ntotal == 0 and not mem_hits:
                 logger.warning("Indices are empty. No data to search.")
                 return [], []
-            requested_k = max(1, int(k))
-            search_k = min(int(search_index.ntotal), max(requested_k * 2, requested_k))
             results: List[Tuple[str, float]] = []
-            while True:
-                dists, ids = search_index.search(query_local, search_k)
-                results = []
-                for id_val, score in zip(ids[0], dists[0], strict=True):
-                    if id_val == -1:
-                        continue
-                    if filter_deleted and id_val in self._deleted_ids:
-                        continue
-                    str_id = self._int_to_str_map.get(id_val)
-                    if str_id is None or (allowed is not None and str_id not in allowed):
-                        continue
-                    results.append((str_id, float(score)))
-                if len(results) >= requested_k or search_k >= int(search_index.ntotal):
-                    break
-                search_k = min(
-                    int(search_index.ntotal),
-                    max(search_k * 2, requested_k),
-                )
+            for id_val, score in mem_hits:
+                if filter_deleted and id_val in self._deleted_ids:
+                    continue
+                str_id = self._int_to_str_map.get(id_val)
+                if str_id is None or (allowed is not None and str_id not in allowed):
+                    continue
+                results.append((str_id, float(score)))
+            if search_index.ntotal > 0:
+                search_k = min(int(search_index.ntotal), max(requested_k * 2, requested_k))
+                while True:
+                    dists, ids = search_index.search(query_local, search_k)
+                    batch_results: List[Tuple[str, float]] = []
+                    for id_val, score in zip(ids[0], dists[0], strict=True):
+                        if id_val == -1:
+                            continue
+                        if filter_deleted and id_val in self._deleted_ids:
+                            continue
+                        str_id = self._int_to_str_map.get(id_val)
+                        if str_id is None or (allowed is not None and str_id not in allowed):
+                            continue
+                        batch_results.append((str_id, float(score)))
+                    merged = {sid: sc for sid, sc in results}
+                    for sid, sc in batch_results:
+                        if sid not in merged or sc > merged[sid]:
+                            merged[sid] = sc
+                    results = sorted(merged.items(), key=lambda x: x[1], reverse=True)[: max(requested_k * 2, requested_k)]
+                    if len(results) >= requested_k or search_k >= int(search_index.ntotal):
+                        break
+                    search_k = min(
+                        int(search_index.ntotal),
+                        max(search_k * 2, requested_k),
+                    )
         results.sort(key=lambda x: x[1], reverse=True)
         results = results[:requested_k]
 
@@ -2020,6 +2044,18 @@ class VectorStore:
         """重启后自举：从磁盘 vectors.bin 加载数据到 fallback 索引"""
         if not self._bin_path.exists() or not self._ids_bin_path.exists():
             return
+
+        # rust-memorix：优先 mem-search（mmap f16 扫描，堆内 O(1)，全精度）
+        try:
+            import mem_search
+
+            mem = mem_search.MemSearchI64(str(self._bin_path), int(self.dimension), str(self._ids_bin_path))
+            if len(mem) > 0:
+                self._mem_fallback = mem
+                logger.info(f"mem-search fallback opened with {len(mem)} items; faiss fallback skips disk bulk")
+                return
+        except Exception as e:
+            logger.info(f"mem-search unavailable ({e}); fallback to faiss bootstrap")
 
         logger.info("Replaying all disk vectors to fallback index...")
         vec_item_size = self.dimension * 2
