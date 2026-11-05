@@ -116,7 +116,6 @@ class ReadOnlyVectorStoreView:
         self._known_hashes = dict(known_hashes)
         self._row_offsets = dict(row_offsets)
         self._lock = threading.RLock()
-        self._mem_fallback = None  # rust-memorix: mem-search 兜底（mmap f16 扫描替代 float32 自举）
         self._index = faiss.IndexIDMap2(faiss.IndexFlatIP(self.dimension))
         self._load_index()
 
@@ -480,6 +479,10 @@ class VectorStore:
 
         # 线程安全锁
         self._lock = threading.RLock()
+
+        # rust-memorix: mem-search 兜底（mmap f16 扫描，替代未训练期 float32 全量）
+        self._mem_fallback = None
+        self._mem_fallback_tried = False
 
         logger.debug(f"向量存储实例已创建: dim={dimension}, mode=SQ8, data_dir={self.data_dir}")
 
@@ -1787,13 +1790,28 @@ class VectorStore:
             requested_k = max(1, int(k))
             # rust-memorix：mem 兜底（磁盘全量，mmap 扫描）与 faiss 兜底（窗口期新增）合并
             mem_hits: List[Tuple[int, float]] = []
-            if search_index is self._fallback_index and self._mem_fallback is not None:
-                try:
-                    mem_hits = self._mem_fallback.search(
-                        query_local.astype(np.float32).ravel().tolist(), requested_k * 2
-                    )
-                except Exception:
-                    mem_hits = []
+            if search_index is self._fallback_index:
+                if self._mem_fallback is None and not self._mem_fallback_tried:
+                    self._mem_fallback_tried = True
+                    try:
+                        import mem_search
+
+                        if self._bin_path.exists() and self._ids_bin_path.exists():
+                            mem = mem_search.MemSearchI64(
+                                str(self._bin_path), int(self.dimension), str(self._ids_bin_path)
+                            )
+                            if len(mem) > 0:
+                                self._mem_fallback = mem
+                                logger.info(f"mem-search fallback opened with {len(mem)} items")
+                    except Exception:
+                        self._mem_fallback = None
+                if self._mem_fallback is not None:
+                    try:
+                        mem_hits = self._mem_fallback.search(
+                            query_local.astype(np.float32).ravel().tolist(), requested_k * 2
+                        )
+                    except Exception:
+                        mem_hits = []
             if search_index.ntotal == 0 and not mem_hits:
                 logger.warning("Indices are empty. No data to search.")
                 return [], []
